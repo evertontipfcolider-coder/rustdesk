@@ -20,13 +20,18 @@ on:
         description: 'Senha Permanente Padrão'
         required: true
         type: string
-      imagem:
-        description: 'URL direta para a imagem do ícone (.png)'
+      icone:
+        description: 'Caminho do ícone no repositório'
         required: false
+        default: '.github/assets/icone.png'
+        type: string
+      logo:
+        description: 'Caminho da logo no repositório'
+        required: false
+        default: '.github/assets/logo.png'
         type: string
 
 env:
-  # Mantendo o ambiente de compilação idêntico ao original do rdgen
   SCITER_RUST_VERSION: "1.75"
   RUST_VERSION: "1.75"
   CARGO_NDK_VERSION: "3.1.2"
@@ -41,19 +46,16 @@ env:
   VERSION: "${{ inputs.version }}"
   UPLOAD_ARTIFACT: 'true'
   
-  # Mapeamento das variáveis dinâmicas capturadas na interface
   server: "${{ inputs.servidor }}"
   key: "${{ inputs.key }}"
   appname: "RustDesk"
   filename: "rustdesk-custom"
   
-  # Injeção da senha permanente e do servidor no arquivo customizado final
   custom: "permanentPassword=${{ inputs.senha }}\nid-server=${{ inputs.servidor }}\nrelay-server=${{ inputs.servidor }}\n"
 
 jobs:
   generate-bridge:
     uses: ./.github/workflows/bridge.yml
-    # Correção: removido o bloco 'with' que passava a versão inválida para este reusável
 
   build-RustDeskTempTopMostWindow:
     uses: ./.github/workflows/third-party-RustDeskTempTopMostWindow.yml
@@ -90,6 +92,15 @@ jobs:
             core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
             core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
 
+      - name: Save Repository Assets to Memory
+        shell: pwsh
+        run: |
+          # Como o próximo passo limpa o diretório clonando o repositório do RustDesk por cima,
+          # salvamos suas imagens customizadas temporariamente fora da pasta de build.
+          mkdir C:\temp_assets -ErrorAction SilentlyContinue
+          if (Test-Path "${{ inputs.icone }}") { cp "${{ inputs.icone }}" C:\temp_assets\icone.png }
+          if (Test-Path "${{ inputs.logo }}") { cp "${{ inputs.logo }}" C:\temp_assets\logo.png }
+
       - name: Checkout source code
         uses: actions/checkout@v4
         with:
@@ -120,17 +131,21 @@ jobs:
           sed -i -e 's|rs-ny.rustdesk.com|${{ env.server }}|' ./libs/hbb_common/src/config.rs
           sed -i -e 's|OeVuKk5nlHiXp+APNn0Y3pC1Iwpwn44JGqrQCsWqmBw=|${{ env.key }}|' ./libs/hbb_common/src/config.rs
 
-      - name: Process Custom Icon (Image)
-        if: ${{ inputs.imagem != '' }}
+      - name: Process Custom App Icon
         shell: pwsh
         run: |
-          Invoke-WebRequest -Uri "${{ inputs.imagem }}" -OutFile ./res/icon.png
-          magick ./res/icon.png -define icon:auto-resize=256,64,48,32,16 ./res/icon.ico
-          cp ./res/icon.ico ./res/tray-icon.ico
-          magick ./res/icon.png -resize 32x32 ./res/32x32.png
-          magick ./res/icon.png -resize 64x64 ./res/64x64.png
-          magick ./res/icon.png -resize 128x128 ./res/128x128.png
-          magick ./res/128x128.png -resize 200% ./res/128x128@2x.png
+          if (Test-Path "C:\temp_assets\icone.png") {
+            cp "C:\temp_assets\icone.png" ./res/icon.png
+            magick ./res/icon.png -define icon:auto-resize=256,64,48,32,16 ./res/icon.ico
+            cp ./res/icon.ico ./res/tray-icon.ico
+            magick ./res/icon.png -resize 32x32 ./res/32x32.png
+            magick ./res/icon.png -resize 64x64 ./res/64x64.png
+            magick ./res/icon.png -resize 128x128 ./res/128x128.png
+            magick ./res/128x128.png -resize 200% ./res/128x128@2x.png
+            Write-Output "Ícone do sistema aplicado com sucesso."
+          } else {
+            Write-Output "Nenhum ícone customizado foi encontrado. Usando o padrão do RustDesk."
+          }
 
       - name: Install LLVM and Clang
         uses: KyleMayes/install-llvm-action@v1
@@ -193,6 +208,16 @@ jobs:
           Remove-Item -Path usbmmidd_v2\Win32 -Recurse
           Remove-Item -Path "usbmmidd_v2\deviceinstaller64.exe", "usbmmidd_v2\deviceinstaller.exe", "usbmmidd_v2\usbmmidd.bat"
           mv -Force .\usbmmidd_v2 ./rustdesk
+
+      - name: Process Custom App Logo
+        shell: pwsh
+        run: |
+          if (Test-Path "C:\temp_assets\logo.png") {
+            cp "C:\temp_assets\logo.png" ./rustdesk/data/flutter_assets/assets/logo.png
+            Write-Output "Logo interna aplicada com sucesso."
+          } else {
+            Write-Output "Nenhuma logo interna customizada foi encontrada. Usando a padrão do RustDesk."
+          }
 
       - name: Download RustDeskTempTopMostWindow artifacts
         uses: actions/download-artifact@master
