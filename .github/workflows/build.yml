@@ -53,8 +53,7 @@ env:
 jobs:
   generate-bridge:
     uses: ./.github/workflows/bridge.yml
-    with:
-      version: ${{ inputs.version }}
+    # Correção: removido o bloco 'with' que passava a versão inválida para este reusável
 
   build-RustDeskTempTopMostWindow:
     uses: ./.github/workflows/third-party-RustDeskTempTopMostWindow.yml
@@ -118,7 +117,6 @@ jobs:
       - name: Inject Custom Server and Key into Rust Source
         shell: bash
         run: |
-          # Substitui o servidor e a chave padrão direto nas entranhas do código Rust
           sed -i -e 's|rs-ny.rustdesk.com|${{ env.server }}|' ./libs/hbb_common/src/config.rs
           sed -i -e 's|OeVuKk5nlHiXp+APNn0Y3pC1Iwpwn44JGqrQCsWqmBw=|${{ env.key }}|' ./libs/hbb_common/src/config.rs
 
