@@ -1,4 +1,4 @@
-name: Custom Windows Client Generator
+name: Custom Windows Client Generator v2
 
 on: 
   workflow_dispatch:
