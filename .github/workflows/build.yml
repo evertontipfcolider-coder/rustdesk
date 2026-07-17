@@ -9,12 +9,11 @@ jobs:
 
     steps:
       - name: Checkout do código
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Baixar RustDesk Oficial
         shell: powershell
         run: |
-          # Baixa a versão estável do RustDesk
           Invoke-WebRequest -Uri "https://github.com/rustdesk/rustdesk/releases/download/1.2.3/rustdesk-1.2.3-x86_64.exe" -OutFile "rustdesk-original.exe"
 
       - name: Baixar Resource Hacker
@@ -42,23 +41,22 @@ jobs:
             "enableDirectIP": "on"
           }
           '@
-          # Salvando com encoding estrito para evitar quebras de caracteres no binário
           [System.IO.File]::WriteAllText("config.json", $jsonConfig, [System.Text.Encoding]::UTF8)
 
       - name: Injetar Configurações no Executável
         shell: cmd
         run: |
-          :: Usando a sintaxe estrita de script do Resource Hacker para garantir a criação do arquivo
-          echo [FILENAMES] > rh_script.txt
-          echo Exe=rustdesk-original.exe >> rh_script.txt
-          echo SaveAs=rustdesk-custom.exe >> rh_script.txt
-          echo [COMMANDS] >> rh_script.txt
-          echo -addoverwrite config.json, RCData, CONFIG, >> rh_script.txt
-          
-          .\rh\ResourceHacker.exe -script rh_script.txt
+          :: Forçando caminhos absolutos com %CD% para garantir que o Resource Hacker encontre os arquivos
+          .\rh\ResourceHacker.exe -open "%CD%\rustdesk-original.exe" -save "%CD%\rustdesk-custom.exe" -action addoverwrite -res "%CD%\config.json" -mask RCData,CONFIG,
+
+      - name: Verificar se o arquivo foi criado (Debug)
+        shell: cmd
+        run: |
+          dir
 
       - name: Upload do Executável Customizado
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: Suporte-RustDesk
           path: rustdesk-custom.exe
+          if-no-files-found: error
