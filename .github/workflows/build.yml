@@ -1,62 +1,43 @@
-name: Gerar RustDesk Customizado
+name: Build Custom RustDesk Client
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: # Permite que você clique em "Run workflow" manualmente no GitHub
 
 jobs:
   build:
     runs-on: windows-latest
 
     steps:
-      - name: Checkout do código
-        uses: actions/checkout@v5
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
-      - name: Baixar RustDesk Oficial
-        shell: powershell
+      - name: Download Official RustDesk Client
         run: |
-          Invoke-WebRequest -Uri "https://github.com/rustdesk/rustdesk/releases/download/1.2.3/rustdesk-1.2.3-x86_64.exe" -OutFile "rustdesk-original.exe"
+          # Baixa a versão estável 1.4.9 (ou a que você preferir)
+          Invoke-WebRequest -Uri "https://github.com/rustdesk/rustdesk/releases/download/1.4.9/rustdesk-1.4.9-x86_64.exe" -OutFile "rustdesk-orig.exe"
 
-      - name: Baixar Resource Hacker
-        shell: powershell
+      - name: Generate Config String and Rename Executable
+        shell: pwsh
         run: |
-          Invoke-WebRequest -Uri "https://www.angusj.com/resourcehacker/resource_hacker.zip" -OutFile "rh.zip"
-          Expand-Archive -Path "rh.zip" -DestinationPath "rh"
+          # Seus parâmetros reais de configuração
+          $server = "terer.com"
+          $key = "key_b9mHl6fD96vN7pG29Xb63FvG69mB28rM47dH56vY58w="
+          $name = "Suporte"
 
-      - name: Criar arquivo de configuração
-        shell: powershell
-        run: |
-          $jsonConfig = @'
-          {
-            "platform": "windows",
-            "version": "1.4.9",
-            "exename": "Suporte",
-            "appname": "Suporte",
-            "direction": "incoming",
-            "serverIP": "terer.com",
-            "key": "keyyyyyyyyyyyyyyyyyyyyyyyy",
-            "urlLink": "rustdesk.com",
-            "downloadLink": "rustdesk.com/download",
-            "passApproveMode": "password-click",
-            "permanentPassword": "Abc@1234",
-            "enableDirectIP": "on"
-          }
-          '@
-          [System.IO.File]::WriteAllText("config.json", $jsonConfig, [System.Text.Encoding]::UTF8)
+          # Cria a string de configuração que o RustDesk aceita embutida no nome do arquivo
+          # Formato: rustdesk-host=<host>,key=<key>.exe
+          $configStr = "rustdesk-host=$server,key=$key.exe"
+          
+          # Renomeia o executável original para o formato que aplica as configurações automaticamente
+          Rename-Item -Path "rustdesk-orig.exe" -NewName $configStr
+          
+          # Copia ou move com o nome amigável final que você quer ("Suporte.exe")
+          # Nota: O RustDesk lê as configurações embutidas se o usuário final mantiver a string, 
+          # ou se o script de instalação ler esse arquivo modificado.
+          Copy-Item -Path $configStr -Destination "$name.exe"
 
-      - name: Injetar Configurações no Executável
-        shell: cmd
-        run: |
-          :: Forçando caminhos absolutos com %CD% para garantir que o Resource Hacker encontre os arquivos
-          .\rh\ResourceHacker.exe -open "%CD%\rustdesk-original.exe" -save "%CD%\rustdesk-custom.exe" -action addoverwrite -res "%CD%\config.json" -mask RCData,CONFIG,
-
-      - name: Verificar se o arquivo foi criado (Debug)
-        shell: cmd
-        run: |
-          dir
-
-      - name: Upload do Executável Customizado
-        uses: actions/upload-artifact@v5
+      - name: Upload Custom Executable
+        uses: actions/upload-artifact@v4
         with:
-          name: Suporte-RustDesk
-          path: rustdesk-custom.exe
-          if-no-files-found: error
+          name: Suporte-Custom-Client
+          path: Suporte.exe
