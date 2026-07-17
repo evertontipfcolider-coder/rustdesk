@@ -1,0 +1,56 @@
+name: Gerar RustDesk Customizado
+
+on:
+  workflow_dispatch: # Permite que você execute manualmente pelo botão no GitHub
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Baixar RustDesk Oficial
+        run: |
+          # Baixa a versão estável do RustDesk (você pode alterar a versão na URL se quiser)
+          Invoke-WebRequest -Uri "https://github.com/rustdesk/rustdesk/releases/download/1.2.3/rustdesk-1.2.3-x86_64.exe" -OutFile "rustdesk-original.exe"
+
+      - name: Baixar Resource Hacker
+        run: |
+          # Ferramenta necessária para injetar o JSON e trocar o ícone dentro do .exe
+          Invoke-WebRequest -Uri "https://www.angusj.com/resourcehacker/resource_hacker.zip" -OutFile "rh.zip"
+          Expand-Archive -Path "rh.zip" -DestinationPath "rh"
+
+      - name: Criar arquivo de configuração
+        run: |
+          # Aqui criamos o arquivo que o RustDesk lê ao iniciar
+          $jsonConfig = @'
+          {
+            "platform": "windows",
+            "version": "1.4.9",
+            "exename": "Suporte",
+            "appname": "Suporte",
+            "direction": "incoming",
+            "serverIP": "terer.com",
+            "key": "keyyyyyyyyyyyyyyyyyyyyyyyy",
+            "urlLink": "rustdesk.com",
+            "downloadLink": "rustdesk.com/download",
+            "passApproveMode": "password-click",
+            "permanentPassword": "Abc@1234",
+            "enableDirectIP": "on"
+          }
+          '@
+          Out-File -FilePath "config.json" -InputObject $jsonConfig -Encoding utf8
+
+      - name: Injetar Configurações no Executável
+        run: |
+          # Executa o Resource Hacker para embutir o JSON dentro dos recursos do .exe
+          # O RustDesk procura a configuração customizada em uma seção específica de texto/recurso
+          .\rh\ResourceHacker.exe -open rustdesk-original.exe -save rustdesk-custom.exe -action addoverwrite -res config.json -mask RCData,CONFIG,
+
+      - name: Upload do Executável Customizado
+        uses: actions/upload-artifact@v4
+        with:
+          name: Suporte-RustDesk
+          path: rustdesk-custom.exe
