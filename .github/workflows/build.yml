@@ -20,8 +20,8 @@ jobs:
         shell: pwsh
         run: |
           # Seus parâmetros reais de configuração
-          $server = "terer.com"
-          $key = "key_b9mHl6fD96vN7pG29Xb63FvG69mB28rM47dH56vY58w="
+          $server = "rd.colider.abrachamado.com.br"
+          $key = "oKGLwFMmK9BN3Xp4P5wUTmLi17VlNla4i0SMnqyCH9U="
           $name = "Suporte"
 
           # Cria a string de configuração que o RustDesk aceita embutida no nome do arquivo
