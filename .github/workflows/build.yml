@@ -1,43 +1,223 @@
-name: Build Custom RustDesk Client
+name: Custom Windows Client Generator
 
-on:
-  workflow_dispatch: # Permite que você clique em "Run workflow" manualmente no GitHub
+on: 
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Versão do RustDesk para compilar (ex: 1.4.9 ou master)'
+        required: true
+        default: '1.4.9'
+        type: string
+      key:
+        description: 'Chave Pública do Servidor (Key)'
+        required: true
+        type: string
+      senha:
+        description: 'Senha Permanente Padrão'
+        required: true
+        type: string
+      imagem:
+        description: 'URL direta para a imagem do ícone (.png)'
+        required: false
+        type: string
+
+env:
+  # Mantendo o ambiente de compilação idêntico ao original do rdgen
+  SCITER_RUST_VERSION: "1.75"
+  RUST_VERSION: "1.75"
+  CARGO_NDK_VERSION: "3.1.2"
+  SCITER_ARMV7_CMAKE_VERSION: "3.29.7"
+  SCITER_NASM_DEBVERSION: "2.15.05-1"
+  LLVM_VERSION: "15.0.6"
+  FLUTTER_VERSION: "3.24.5"
+  ANDROID_FLUTTER_VERSION: "3.24.5"
+  FLUTTER_ELINUX_VERSION: "3.16.9"
+  VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+  VCPKG_COMMIT_ID: "120deac3062162151622ca4860575a33844ba10b"
+  VERSION: "${{ inputs.version }}"
+  UPLOAD_ARTIFACT: 'true'
+  
+  # Mapeamento das suas variáveis para o comportamento interno do compilador
+  server: "rs-ny.rustdesk.com" # Servidor padrão (pode ser modificado se necessário)
+  key: "${{ inputs.key }}"
+  appname: "RustDesk"
+  filename: "rustdesk-custom"
+  
+  # Injeção da senha permanente no arquivo customizado final
+  custom: "permanentPassword=${{ inputs.senha }}\n"
 
 jobs:
-  build:
-    runs-on: windows-latest
+  generate-bridge:
+    uses: ./.github/workflows/bridge.yml
+    with:
+      version: ${{ inputs.version }}
 
+  build-RustDeskTempTopMostWindow:
+    uses: ./.github/workflows/third-party-RustDeskTempTopMostWindow.yml
+    with:
+      upload-artifact: true
+      target: windows-2022
+      configuration: Release
+      platform: x64
+      target_version: Windows10
+    secrets: inherit
+
+  build-for-windows-flutter:
+    name: Build Windows
+    needs: [build-RustDeskTempTopMostWindow, generate-bridge]
+    runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        job:
+          - {
+              target: x86_64-pc-windows-msvc,
+              os: windows-2022,
+              arch: x86_64,
+              vcpkg-triplet: x64-windows-static,
+            }
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Download Official RustDesk Client
-        run: |
-          # Baixa a versão estável 1.4.9 (ou a que você preferir)
-          Invoke-WebRequest -Uri "https://github.com/rustdesk/rustdesk/releases/download/1.4.9/rustdesk-1.4.9-x86_64.exe" -OutFile "rustdesk-orig.exe"
+      - name: Export GitHub Actions cache environment variables
+        uses: actions/github-script@v6
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
 
-      - name: Generate Config String and Rename Executable
+      - name: Checkout source code
+        uses: actions/checkout@v4
+        with:
+          repository: rustdesk/rustdesk
+          ref: refs/tags/${{ env.VERSION }}
+          submodules: recursive
+
+      - name: Restore bridge files
+        uses: actions/download-artifact@master
+        with:
+          name: bridge-artifact
+          path: ./
+
+      - name: Install ImageMagick on Windows
+        run: |
+          choco install -y imagemagick.app --no-progress
+          Get-ChildItem -Path "${env:ProgramFiles}" | % { $_.FullName } | Select-String -Pattern "[\/\\]ImageMagick[^\/\\]*$" | Out-File -Append -FilePath $env:GITHUB_PATH -Encoding utf8
+
+      - name: fix flutter_gpu_texture_renderer
+        shell: bash
+        run: |
+          sed -i -e 's|2ded7f146437a761ffe6981e2f742038f85ca68d|08a471bb8ceccdd50483c81cdfa8b81b07b14b87|' ./flutter/pubspec.lock
+          sed -i -e 's|2ded7f146437a761ffe6981e2f742038f85ca68d|08a471bb8ceccdd50483c81cdfa8b81b07b14b87|' ./flutter/pubspec.yaml
+
+      - name: Inject Custom Key into Rust Source
+        shell: bash
+        run: |
+          sed -i -e 's|OeVuKk5nlHiXp+APNn0Y3pC1Iwpwn44JGqrQCsWqmBw=|${{ env.key }}|' ./libs/hbb_common/src/config.rs
+
+      - name: Process Custom Icon (Image)
+        if: ${{ inputs.imagem != '' }}
         shell: pwsh
         run: |
-          # Seus parâmetros reais de configuração
-          $server = "rd.colider.abrachamado.com.br"
-          $key = "oKGLwFMmK9BN3Xp4P5wUTmLi17VlNla4i0SMnqyCH9U="
-          $name = "Suporte"
-
-          # Cria a string de configuração que o RustDesk aceita embutida no nome do arquivo
-          # Formato: rustdesk-host=<host>,key=<key>.exe
-          $configStr = "rustdesk-host=$server,key=$key.exe"
+          # Baixa a imagem informada na variável pelo link direto
+          Invoke-WebRequest -Uri "${{ inputs.imagem }}" -OutFile ./res/icon.png
           
-          # Renomeia o executável original para o formato que aplica as configurações automaticamente
-          Rename-Item -Path "rustdesk-orig.exe" -NewName $configStr
-          
-          # Copia ou move com o nome amigável final que você quer ("Suporte.exe")
-          # Nota: O RustDesk lê as configurações embutidas se o usuário final mantiver a string, 
-          # ou se o script de instalação ler esse arquivo modificado.
-          Copy-Item -Path $configStr -Destination "$name.exe"
+          # Recria as estruturas de ícone usando o ImageMagick exatamente como no fluxo original
+          magick ./res/icon.png -define icon:auto-resize=256,64,48,32,16 ./res/icon.ico
+          cp ./res/icon.ico ./res/tray-icon.ico
+          magick ./res/icon.png -resize 32x32 ./res/32x32.png
+          magick ./res/icon.png -resize 64x64 ./res/64x64.png
+          magick ./res/icon.png -resize 128x128 ./res/128x128.png
+          magick ./res/128x128.png -resize 200% ./res/128x128@2x.png
 
-      - name: Upload Custom Executable
+      - name: Install LLVM and Clang
+        uses: KyleMayes/install-llvm-action@v1
+        with:
+          version: ${{ env.LLVM_VERSION }}
+
+      - name: Install flutter
+        uses: subosito/flutter-action@v2.12.0
+        with:
+          channel: "stable"
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+
+      - name: Replace engine with rustdesk custom flutter engine
+        run: |
+          flutter doctor -v
+          flutter precache --windows
+          Invoke-WebRequest -Uri https://github.com/rustdesk/engine/releases/download/main/windows-x64-release.zip -OutFile windows-x64-release.zip
+          Expand-Archive -Path windows-x64-release.zip -DestinationPath windows-x64-release
+          mv -Force windows-x64-release/*  C:/hostedtoolcache/windows/flutter/stable-${{ env.FLUTTER_VERSION }}-x64/bin/cache/artifacts/engine/windows-x64-release/
+
+      - name: Patch flutter
+        shell: bash
+        run: |
+          cp .github/patches/flutter_3.24.4_dropdown_menu_enableFilter.diff $(dirname $(dirname $(which flutter)))
+          cd $(dirname $(dirname $(which flutter)))
+          [[ "3.24.5" == ${{env.FLUTTER_VERSION}} ]] && git apply flutter_3.24.4_dropdown_menu_enableFilter.diff
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: ${{ env.SCITER_RUST_VERSION }}
+          targets: ${{ matrix.job.target }}
+          components: "rustfmt"
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: ${{ matrix.job.os }}
+
+      - name: Setup vcpkg with Github Actions binary cache
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgDirectory: C:\vcpkg
+          vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
+          doNotCache: false
+
+      - name: Install vcpkg dependencies
+        env:
+          VCPKG_DEFAULT_HOST_TRIPLET: ${{ matrix.job.vcpkg-triplet }}
+        run: |
+          $VCPKG_ROOT/vcpkg install --triplet ${{ matrix.job.vcpkg-triplet }} --x-install-root="$VCPKG_ROOT/installed"
+        shell: bash
+
+      - name: Build rustdesk
+        run: |
+          python3 .\build.py --portable --hwcodec --flutter --vram --skip-portable-pack
+          mv ./flutter/build/windows/x64/runner/Release ./rustdesk 
+          
+          Invoke-WebRequest -Uri https://github.com/rustdesk-org/rdev/releases/download/usbmmidd_v2/usbmmidd_v2.zip -OutFile usbmmidd_v2.zip
+          Expand-Archive usbmmidd_v2.zip -DestinationPath . -Force
+          Remove-Item -Path usbmmidd_v2\Win32 -Recurse
+          Remove-Item -Path "usbmmidd_v2\deviceinstaller64.exe", "usbmmidd_v2\deviceinstaller.exe", "usbmmidd_v2\usbmmidd.bat"
+          mv -Force .\usbmmidd_v2 ./rustdesk
+
+      - name: Download RustDeskTempTopMostWindow artifacts
+        uses: actions/download-artifact@master
+        with:
+          name: topmostwindow-artifacts
+          path: "./rustdesk"
+
+      - name: Create custom.txt file (Injeta a Senha Permanente)
+        shell: bash
+        run: |
+          echo -e "${{ env.custom }}" > ./rustdesk/custom_.txt
+
+      - name: Build self-extracted executable
+        shell: bash
+        run: |
+          mv "./rustdesk/rustdesk.exe" "./rustdesk/${{ env.appname }}.exe" || echo "rustdesk.exe"
+          sed -i '/dpiAware/d' res/manifest.xml
+          pushd ./libs/portable
+          pip3 install -r requirements.txt
+          python3 ./generate.py -f ../../rustdesk/ -o . -e "../../rustdesk/${{ env.appname }}.exe"
+          popd
+          mkdir -p ./SignOutput
+          mv ./target/release/rustdesk-portable-packer.exe "./SignOutput/${{ env.filename }}.exe"
+
+      - name: Upload Binary Result
         uses: actions/upload-artifact@v4
         with:
-          name: Suporte-Custom-Client
-          path: Suporte.exe
+          name: RustDesk-Custom-Windows
+          path: ./SignOutput/*.exe
