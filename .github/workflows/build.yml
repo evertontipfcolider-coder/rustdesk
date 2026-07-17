@@ -1,4 +1,4 @@
-name: Custom Windows Client Generator v2
+name: Custom Windows Client Generator
 
 on: 
   workflow_dispatch:
@@ -7,6 +7,10 @@ on:
         description: 'Versão do RustDesk para compilar (ex: 1.4.9 ou master)'
         required: true
         default: '1.4.9'
+        type: string
+      servidor:
+        description: 'Endereço do seu Servidor de ID (ex: terer.com)'
+        required: true
         type: string
       key:
         description: 'Chave Pública do Servidor (Key)'
@@ -37,14 +41,14 @@ env:
   VERSION: "${{ inputs.version }}"
   UPLOAD_ARTIFACT: 'true'
   
-  # Mapeamento das suas variáveis para o comportamento interno do compilador
-  server: "rs-ny.rustdesk.com" # Servidor padrão (pode ser modificado se necessário)
+  # Mapeamento das variáveis dinâmicas capturadas na interface
+  server: "${{ inputs.servidor }}"
   key: "${{ inputs.key }}"
   appname: "RustDesk"
   filename: "rustdesk-custom"
   
-  # Injeção da senha permanente no arquivo customizado final
-  custom: "permanentPassword=${{ inputs.senha }}\n"
+  # Injeção da senha permanente e do servidor no arquivo customizado final
+  custom: "permanentPassword=${{ inputs.senha }}\nid-server=${{ inputs.servidor }}\nrelay-server=${{ inputs.servidor }}\n"
 
 jobs:
   generate-bridge:
@@ -111,19 +115,18 @@ jobs:
           sed -i -e 's|2ded7f146437a761ffe6981e2f742038f85ca68d|08a471bb8ceccdd50483c81cdfa8b81b07b14b87|' ./flutter/pubspec.lock
           sed -i -e 's|2ded7f146437a761ffe6981e2f742038f85ca68d|08a471bb8ceccdd50483c81cdfa8b81b07b14b87|' ./flutter/pubspec.yaml
 
-      - name: Inject Custom Key into Rust Source
+      - name: Inject Custom Server and Key into Rust Source
         shell: bash
         run: |
+          # Substitui o servidor e a chave padrão direto nas entranhas do código Rust
+          sed -i -e 's|rs-ny.rustdesk.com|${{ env.server }}|' ./libs/hbb_common/src/config.rs
           sed -i -e 's|OeVuKk5nlHiXp+APNn0Y3pC1Iwpwn44JGqrQCsWqmBw=|${{ env.key }}|' ./libs/hbb_common/src/config.rs
 
       - name: Process Custom Icon (Image)
         if: ${{ inputs.imagem != '' }}
         shell: pwsh
         run: |
-          # Baixa a imagem informada na variável pelo link direto
           Invoke-WebRequest -Uri "${{ inputs.imagem }}" -OutFile ./res/icon.png
-          
-          # Recria as estruturas de ícone usando o ImageMagick exatamente como no fluxo original
           magick ./res/icon.png -define icon:auto-resize=256,64,48,32,16 ./res/icon.ico
           cp ./res/icon.ico ./res/tray-icon.ico
           magick ./res/icon.png -resize 32x32 ./res/32x32.png
@@ -199,7 +202,7 @@ jobs:
           name: topmostwindow-artifacts
           path: "./rustdesk"
 
-      - name: Create custom.txt file (Injeta a Senha Permanente)
+      - name: Create custom.txt file (Injeta Configurações Iniciais)
         shell: bash
         run: |
           echo -e "${{ env.custom }}" > ./rustdesk/custom_.txt
