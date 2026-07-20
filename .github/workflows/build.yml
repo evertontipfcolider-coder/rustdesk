@@ -121,20 +121,21 @@ jobs:
           sed -i -e 's|2ded7f146437a761ffe6981e2f742038f85ca68d|08a471bb8ceccdd50483c81cdfa8b81b07b14b87|' ./flutter/pubspec.lock
           sed -i -e 's|2ded7f146437a761ffe6981e2f742038f85ca68d|08a471bb8ceccdd50483c81cdfa8b81b07b14b87|' ./flutter/pubspec.yaml
 
-      - name: Inject Custom Configurations (Rust + Flutter Source)
+      - name: Apply rdgen Code Injections (Rust + Flutter)
         shell: bash
         run: |
-          # 1. Substituição do Servidor e Key nas libs de comunicação do Rust
-          find . -type f \( -name "config.rs" -o -name "common.rs" -o -name "client.rs" \) -exec sed -i 's|rs-ny.rustdesk.com|${{ env.server }}|g' {} +
-          find . -type f \( -name "config.rs" -o -name "common.rs" -o -name "client.rs" \) -exec sed -i 's|OeVuKk5nlHiXp+APNn0Y3pC1Iwpwn44JGqrQCsWqmBw=|${{ env.key }}|g' {} +
+          # 1. Substitui host e key padrão no código Rust
+          find libs/ -name "*.rs" -exec sed -i 's|rs-ny.rustdesk.com|${{ env.server }}|g' {} +
+          find libs/ -name "*.rs" -exec sed -i 's|OeVuKk5nlHiXp+APNn0Y3pC1Iwpwn44JGqrQCsWqmBw=|${{ env.key }}|g' {} +
+          find src/ -name "*.rs" -exec sed -i 's|rs-ny.rustdesk.com|${{ env.server }}|g' {} +
+          find src/ -name "*.rs" -exec sed -i 's|OeVuKk5nlHiXp+APNn0Y3pC1Iwpwn44JGqrQCsWqmBw=|${{ env.key }}|g' {} +
 
-          # 2. Injeta padrões do servidor no código Dart/Flutter
-          find flutter/lib/ -type f -name "*.dart" -exec sed -i 's|rs-ny.rustdesk.com|${{ env.server }}|g' {} +
-          find flutter/lib/ -type f -name "*.dart" -exec sed -i 's|OeVuKk5nlHiXp+APNn0Y3pC1Iwpwn44JGqrQCsWqmBw=|${{ env.key }}|g' {} +
-
-          # 3. Força a flag de exibição apenas de entrada (Incoming Only / Client Custom)
-          sed -i 's|pub static ref IS_CUSTOM: bool = false;|pub static ref IS_CUSTOM: bool = true;|g' src/common.rs || true
-          sed -i 's|pub static ref IS_INCOMING_ONLY: bool = false;|pub static ref IS_INCOMING_ONLY: bool = true;|g' src/common.rs || true
+          # 2. Força 'is_incoming_only' e 'is_custom' nas constantes e no Dart
+          find flutter/lib/ -name "*.dart" -exec sed -i 's|rs-ny.rustdesk.com|${{ env.server }}|g' {} +
+          find flutter/lib/ -name "*.dart" -exec sed -i 's|OeVuKk5nlHiXp+APNn0Y3pC1Iwpwn44JGqrQCsWqmBw=|${{ env.key }}|g' {} +
+          
+          # Desativa o painel de conexões saintes no código Dart
+          find flutter/lib/ -name "*.dart" -exec sed -i 's|bool isIncomingOnly = false;|bool isIncomingOnly = true;|g' {} + || true
 
       - name: Process Custom App Icon
         shell: pwsh
@@ -225,27 +226,27 @@ jobs:
           name: topmostwindow-artifacts
           path: "./rustdesk"
 
-      - name: Embed Config Files inside Binary Directory before Packer
+      - name: Inject custom_.txt into Portable Folder Before Packing
         shell: pwsh
         run: |
-          # 1. Cria o arquivo de configuração customizada dentro da pasta do executável
-          $server = "${{ inputs.servidor }}"
+          $servidor = "${{ inputs.servidor }}"
           $key = "${{ inputs.key }}"
           $senha = "${{ inputs.senha }}"
 
-          $lines = @(
-              "custom-rendezvous-server=$server",
-              "id-server=$server",
-              "relay-server=$server",
-              "api-server=$server",
+          # Cria o arquivo de configuração custom_.txt exatamente no padrão lido pelo RustDesk Portable
+          $configLines = @(
+              "custom-rendezvous-server=$servidor",
+              "host=$servidor",
+              "relay-server=$servidor",
+              "api-server=$servidor",
               "key=$key",
               "permanent-password=$senha",
               "is-incoming-only=true"
           )
-
-          # Salva o arquivo de configuração no formato esperado pelo carregador
-          $lines | Out-File -FilePath "./rustdesk/custom_.txt" -Encoding utf8
-          $lines | Out-File -FilePath "./rustdesk/config.txt" -Encoding utf8
+          
+          $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+          [System.IO.File]::WriteAllLines("$PWD\rustdesk\custom_.txt", $configLines, $utf8NoBom)
+          [System.IO.File]::WriteAllLines("$PWD\rustdesk\config.txt", $configLines, $utf8NoBom)
 
       - name: Build self-extracted executable
         shell: bash
@@ -253,7 +254,6 @@ jobs:
           mv "./rustdesk/rustdesk.exe" "./rustdesk/${{ env.appname }}.exe" || echo "rustdesk.exe"
           sed -i '/dpiAware/d' res/manifest.xml
           
-          # Injeta a flag de empacotamento com suporte a cliente customizado
           pushd ./libs/portable
           pip3 install -r requirements.txt
           python3 ./generate.py -f ../../rustdesk/ -o . -e "../../rustdesk/${{ env.appname }}.exe"
