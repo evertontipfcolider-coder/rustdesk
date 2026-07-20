@@ -50,8 +50,6 @@ env:
   key: "${{ inputs.key }}"
   appname: "RustDesk"
   filename: "rustdesk-custom"
-  
-  custom: "permanentPassword=${{ inputs.senha }}\nid-server=${{ inputs.servidor }}\nrelay-server=${{ inputs.servidor }}\n"
 
 jobs:
   generate-bridge:
@@ -123,11 +121,15 @@ jobs:
           sed -i -e 's|2ded7f146437a761ffe6981e2f742038f85ca68d|08a471bb8ceccdd50483c81cdfa8b81b07b14b87|' ./flutter/pubspec.lock
           sed -i -e 's|2ded7f146437a761ffe6981e2f742038f85ca68d|08a471bb8ceccdd50483c81cdfa8b81b07b14b87|' ./flutter/pubspec.yaml
 
-      - name: Inject Custom Server and Key into Rust Source
+      - name: Inject Custom Configurations directly into Rust Source
         shell: bash
         run: |
-          sed -i -e 's|rs-ny.rustdesk.com|${{ env.server }}|' ./libs/hbb_common/src/config.rs
-          sed -i -e 's|OeVuKk5nlHiXp+APNn0Y3pC1Iwpwn44JGqrQCsWqmBw=|${{ env.key }}|' ./libs/hbb_common/src/config.rs
+          # 1. Substitui o Servidor e a Key padrão diretamente nas constantes do código Rust
+          sed -i -e 's|rs-ny.rustdesk.com|${{ env.server }}|g' ./libs/hbb_common/src/config.rs
+          sed -i -e 's|OeVuKk5nlHiXp+APNn0Y3pC1Iwpwn44JGqrQCsWqmBw=|${{ env.key }}|g' ./libs/hbb_common/src/config.rs
+
+          # 2. Força o modo 'Apenas Servidor/Apenas Acesso Entrante' no código (Oculta painel de conexão de saída)
+          sed -i -e 's|pub static ref IS_INCOMING_ONLY: bool = false;|pub static ref IS_INCOMING_ONLY: bool = true;|g' ./src/common.rs || true
 
       - name: Process Custom App Icon
         shell: pwsh
@@ -140,9 +142,6 @@ jobs:
             magick ./res/icon.png -resize 64x64 ./res/64x64.png
             magick ./res/icon.png -resize 128x128 ./res/128x128.png
             magick ./res/128x128.png -resize 200% ./res/128x128@2x.png
-            Write-Output "Ícone do sistema aplicado com sucesso."
-          } else {
-            Write-Output "Nenhum ícone customizado foi encontrado. Usando o padrão do RustDesk."
           }
 
       - name: Install LLVM and Clang
@@ -212,9 +211,6 @@ jobs:
         run: |
           if (Test-Path "C:\temp_assets\logo.png") {
             cp "C:\temp_assets\logo.png" ./rustdesk/data/flutter_assets/assets/logo.png
-            Write-Output "Logo interna aplicada com sucesso."
-          } else {
-            Write-Output "Nenhuma logo interna customizada foi encontrada. Usando a padrão do RustDesk."
           }
 
       - name: Download RustDeskTempTopMostWindow artifacts
@@ -224,10 +220,14 @@ jobs:
           name: topmostwindow-artifacts
           path: "./rustdesk"
 
-      - name: Create custom.txt file (Injeta Configurações Iniciais)
-        shell: bash
+      - name: Inject Client Configuration File (custom_.txt)
+        shell: pwsh
         run: |
-          echo -e "${{ env.custom }}" > ./rustdesk/custom_.txt
+          # Monta o arquivo custom_.txt com a chave codificada no formato de string que o RustDesk exige
+          $configContent = "id-server=${{ inputs.servidor }}`nrelay-server=${{ inputs.servidor }}`nkey=${{ inputs.key }}`npermanent-password=${{ inputs.senha }}`ncustom-rendezvous-server=${{ inputs.servidor }}`n"
+          
+          # Salva em UTF8 sem BOM para evitar erros de leitura no packer
+          [System.IO.File]::WriteAllText("$PWD\rustdesk\custom_.txt", $configContent, (New-Object System.Text.UTF8Encoding($false)))
 
       - name: Build self-extracted executable
         shell: bash
