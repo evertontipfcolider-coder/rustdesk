@@ -95,8 +95,6 @@ jobs:
       - name: Save Repository Assets to Memory
         shell: pwsh
         run: |
-          # Como o próximo passo limpa o diretório clonando o repositório do RustDesk por cima,
-          # salvamos suas imagens customizadas temporariamente fora da pasta de build.
           mkdir C:\temp_assets -ErrorAction SilentlyContinue
           if (Test-Path "${{ inputs.icone }}") { cp "${{ inputs.icone }}" C:\temp_assets\icone.png }
           if (Test-Path "${{ inputs.logo }}") { cp "${{ inputs.logo }}" C:\temp_assets\logo.png }
@@ -109,7 +107,7 @@ jobs:
           submodules: recursive
 
       - name: Restore bridge files
-        uses: actions/download-artifact@master
+        uses: actions/download-artifact@v4
         with:
           name: bridge-artifact
           path: ./
@@ -220,7 +218,8 @@ jobs:
           }
 
       - name: Download RustDeskTempTopMostWindow artifacts
-        uses: actions/download-artifact@master
+        uses: actions/download-artifact@v4
+        continue-on-error: true
         with:
           name: topmostwindow-artifacts
           path: "./rustdesk"
