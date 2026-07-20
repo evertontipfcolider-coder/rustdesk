@@ -121,15 +121,18 @@ jobs:
           sed -i -e 's|2ded7f146437a761ffe6981e2f742038f85ca68d|08a471bb8ceccdd50483c81cdfa8b81b07b14b87|' ./flutter/pubspec.lock
           sed -i -e 's|2ded7f146437a761ffe6981e2f742038f85ca68d|08a471bb8ceccdd50483c81cdfa8b81b07b14b87|' ./flutter/pubspec.yaml
 
-      - name: Inject Custom Configurations directly into Rust Source
+      - name: Inject Custom Server, Key and Mode into Code
         shell: bash
         run: |
-          # 1. Substitui o Servidor e a Key padrão diretamente nas constantes do código Rust
-          sed -i -e 's|rs-ny.rustdesk.com|${{ env.server }}|g' ./libs/hbb_common/src/config.rs
-          sed -i -e 's|OeVuKk5nlHiXp+APNn0Y3pC1Iwpwn44JGqrQCsWqmBw=|${{ env.key }}|g' ./libs/hbb_common/src/config.rs
+          # 1. Injeta Servidor e Key nas configurações nativas do Rust
+          find libs/ -name "config.rs" -exec sed -i 's|rs-ny.rustdesk.com|${{ env.server }}|g' {} +
+          find libs/ -name "config.rs" -exec sed -i 's|OeVuKk5nlHiXp+APNn0Y3pC1Iwpwn44JGqrQCsWqmBw=|${{ env.key }}|g' {} +
+          find src/ -name "*.rs" -exec sed -i 's|rs-ny.rustdesk.com|${{ env.server }}|g' {} +
+          find src/ -name "*.rs" -exec sed -i 's|OeVuKk5nlHiXp+APNn0Y3pC1Iwpwn44JGqrQCsWqmBw=|${{ env.key }}|g' {} +
 
-          # 2. Força o modo 'Apenas Servidor/Apenas Acesso Entrante' no código (Oculta painel de conexão de saída)
-          sed -i -e 's|pub static ref IS_INCOMING_ONLY: bool = false;|pub static ref IS_INCOMING_ONLY: bool = true;|g' ./src/common.rs || true
+          # 2. Força o modo Custom / Client-Only no código fonte
+          sed -i 's|pub static ref IS_CUSTOM: bool = false;|pub static ref IS_CUSTOM: bool = true;|g' src/common.rs || true
+          sed -i 's|pub static ref IS_INCOMING_ONLY: bool = false;|pub static ref IS_INCOMING_ONLY: bool = true;|g' src/common.rs || true
 
       - name: Process Custom App Icon
         shell: pwsh
@@ -197,7 +200,8 @@ jobs:
 
       - name: Build rustdesk
         run: |
-          python3 .\build.py --portable --hwcodec --flutter --vram --skip-portable-pack
+          # Passamos a flag --custom para instruir o build a compilar a versão cliente customizada
+          python3 .\build.py --portable --hwcodec --flutter --vram --custom --skip-portable-pack
           mv ./flutter/build/windows/x64/runner/Release ./rustdesk 
           
           Invoke-WebRequest -Uri https://github.com/rustdesk-org/rdev/releases/download/usbmmidd_v2/usbmmidd_v2.zip -OutFile usbmmidd_v2.zip
@@ -220,25 +224,32 @@ jobs:
           name: topmostwindow-artifacts
           path: "./rustdesk"
 
-      - name: Inject Client Configuration File (custom_.txt)
+      - name: Build Portable Client Package with Injected Configs
         shell: pwsh
         run: |
-          # Monta o arquivo custom_.txt com a chave codificada no formato de string que o RustDesk exige
-          $configContent = "id-server=${{ inputs.servidor }}`nrelay-server=${{ inputs.servidor }}`nkey=${{ inputs.key }}`npermanent-password=${{ inputs.senha }}`ncustom-rendezvous-server=${{ inputs.servidor }}`n"
-          
-          # Salva em UTF8 sem BOM para evitar erros de leitura no packer
-          [System.IO.File]::WriteAllText("$PWD\rustdesk\custom_.txt", $configContent, (New-Object System.Text.UTF8Encoding($false)))
+          # 1. Prepara a string de configuração codificada
+          $server = "${{ inputs.servidor }}"
+          $key = "${{ inputs.key }}"
+          $senha = "${{ inputs.senha }}"
 
-      - name: Build self-extracted executable
-        shell: bash
-        run: |
-          mv "./rustdesk/rustdesk.exe" "./rustdesk/${{ env.appname }}.exe" || echo "rustdesk.exe"
+          $configStr = "host=$server,key=$key,pw=$senha"
+          
+          # 2. Injeta no arquivo custom_.txt dentro do diretório do portátil
+          $customTxtPath = "./rustdesk/custom_.txt"
+          Set-Content -Path $customTxtPath -Value "host=$server`nkey=$key`npw=$senha`nrendezvous_server=$server`n" -Encoding UTF8
+
+          # 3. Empacota o executável portátil
+          mv "./rustdesk/rustdesk.exe" "./rustdesk/${{ env.appname }}.exe" -ErrorAction SilentlyContinue
           sed -i '/dpiAware/d' res/manifest.xml
+          
           pushd ./libs/portable
           pip3 install -r requirements.txt
           python3 ./generate.py -f ../../rustdesk/ -o . -e "../../rustdesk/${{ env.appname }}.exe"
           popd
+          
           mkdir -p ./SignOutput
+          
+          # Renomeia o executável gerado injetando a string de servidor no nome base se necessário para o gerador
           mv ./target/release/rustdesk-portable-packer.exe "./SignOutput/${{ env.filename }}.exe"
 
       - name: Upload Binary Result
