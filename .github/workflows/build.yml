@@ -2,34 +2,9 @@ name: Custom Windows Client Generator
 
 on: 
   workflow_dispatch:
-    inputs:
-      version:
-        description: 'Versão do RustDesk para compilar (ex: 1.4.9 ou master)'
-        required: true
-        default: '1.4.9'
-        type: string
-      servidor:
-        description: 'Endereço do seu Servidor de ID (ex: terer.com)'
-        required: true
-        type: string
-      key:
-        description: 'Chave Pública do Servidor (Key)'
-        required: true
-        type: string
-      senha:
-        description: 'Senha Permanente Padrão'
-        required: true
-        type: string
-      icone:
-        description: 'Caminho do ícone no repositório'
-        required: false
-        default: '.github/assets/icone.png'
-        type: string
-      logo:
-        description: 'Caminho da logo no repositório'
-        required: false
-        default: '.github/assets/logo.png'
-        type: string
+  push:
+    paths:
+      - 'config.txt'
 
 env:
   SCITER_RUST_VERSION: "1.75"
@@ -43,11 +18,9 @@ env:
   FLUTTER_ELINUX_VERSION: "3.16.9"
   VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
   VCPKG_COMMIT_ID: "120deac3062162151622ca4860575a33844ba10b"
-  VERSION: "${{ inputs.version }}"
+  VERSION: "1.4.9"
   UPLOAD_ARTIFACT: 'true'
   
-  server: "${{ inputs.servidor }}"
-  key: "${{ inputs.key }}"
   appname: "Suporte"
   filename: "Suporte-TI"
 
@@ -80,8 +53,10 @@ jobs:
               vcpkg-triplet: x64-windows-static,
             }
     steps:
-      - name: Checkout Repository
+      - name: Checkout Custom Repository (Assets & Config)
         uses: actions/checkout@v4
+        with:
+          path: custom_repo
 
       - name: Export GitHub Actions cache environment variables
         uses: actions/github-script@v6
@@ -90,14 +65,34 @@ jobs:
             core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
             core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
 
-      - name: Save Repository Assets to Memory
+      - name: Parse Configuration File (config.txt)
+        shell: pwsh
+        run: |
+          $configFile = "custom_repo/config.txt"
+          if (Test-Path $configFile) {
+            Get-Content $configFile | ForEach-Object {
+              if ($_ -and -not $_.StartsWith("#")) {
+                $pair = $_.Split("=", 2)
+                if ($pair.Length -eq 2) {
+                  $key = $pair[0].Trim()
+                  $value = $pair[1].Trim()
+                  Write-Output "$key=$value" >> $env:GITHUB_ENV
+                }
+              }
+            }
+          } else {
+            Write-Error "Arquivo config.txt nao encontrado no repositorio!"
+            exit 1
+          }
+
+      - name: Save Repository Assets
         shell: pwsh
         run: |
           mkdir C:\temp_assets -ErrorAction SilentlyContinue
-          if (Test-Path "${{ inputs.icone }}") { cp "${{ inputs.icone }}" C:\temp_assets\icone.png }
-          if (Test-Path "${{ inputs.logo }}") { cp "${{ inputs.logo }}" C:\temp_assets\logo.png }
+          if (Test-Path "custom_repo/.github/assets/icone.png") { cp "custom_repo/.github/assets/icone.png" C:\temp_assets\icone.png }
+          if (Test-Path "custom_repo/.github/assets/logo.png") { cp "custom_repo/.github/assets/logo.png" C:\temp_assets\logo.png }
 
-      - name: Checkout source code
+      - name: Checkout RustDesk Source
         uses: actions/checkout@v4
         with:
           repository: rustdesk/rustdesk
@@ -115,21 +110,12 @@ jobs:
           choco install -y imagemagick.app --no-progress
           Get-ChildItem -Path "${env:ProgramFiles}" | % { $_.FullName } | Select-String -Pattern "[\/\\]ImageMagick[^\/\\]*$" | Out-File -Append -FilePath $env:GITHUB_PATH -Encoding utf8
 
-      - name: fix flutter_gpu_texture_renderer
-        shell: bash
-        run: |
-          sed -i -e 's|2ded7f146437a761ffe6981e2f742038f85ca68d|08a471bb8ceccdd50483c81cdfa8b81b07b14b87|' ./flutter/pubspec.lock
-          sed -i -e 's|2ded7f146437a761ffe6981e2f742038f85ca68d|08a471bb8ceccdd50483c81cdfa8b81b07b14b87|' ./flutter/pubspec.yaml
-
-      - name: Process App Icons for Windows Runner and Rust
+      - name: Process App Icons for Windows Runner
         shell: pwsh
         run: |
           if (Test-Path "C:\temp_assets\icone.png") {
-            # Gera os tamanhos de ícone
-            magick ./C:\temp_assets\icone.png -define icon:auto-resize=256,64,48,32,16 ./res/icon.ico
+            magick C:\temp_assets\icone.png -define icon:auto-resize=256,64,48,32,16 ./res/icon.ico
             cp ./res/icon.ico ./res/tray-icon.ico
-            
-            # Copia diretamente para o Runner do Flutter (corrige o ícone da janela)
             cp ./res/icon.ico ./flutter/windows/runner/resources/app_icon.ico
             
             magick C:\temp_assets\icone.png -resize 32x32 ./res/32x32.png
@@ -214,21 +200,28 @@ jobs:
           name: topmostwindow-artifacts
           path: "./rustdesk"
 
-      - name: Inject Configuration & Force QS Mode
+      - name: Inject Custom Settings from config.txt
         shell: pwsh
         run: |
-          $servidor = "${{ inputs.servidor }}"
-          $key = "${{ inputs.key }}"
-          $senha = "${{ inputs.senha }}"
+          $servidor = "${{ env.SERVER }}"
+          $key = "${{ env.KEY }}"
+          $senha = "${{ env.PASSWORD }}"
 
-          # Cria a string de configuração nos locais lidos pela engine
-          $configContent = "host=$servidor`nkey=$key`napi-server=http://$servidor`:21114`ncustom-rendezvous-server=$servidor`nrendezvous_server=$servidor`npermanent-password=$senha`nis-incoming-only=true`n"
-
+          $configLines = @(
+              "custom-rendezvous-server=$servidor",
+              "host=$servidor",
+              "relay-server=$servidor",
+              "api-server=http://$servidor`:21114",
+              "key=$key",
+              "permanent-password=$senha",
+              "is-incoming-only=true"
+          )
+          
           $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-          [System.IO.File]::WriteAllText("$PWD/rustdesk/custom_.txt", $configContent, $utf8NoBom)
-          [System.IO.File]::WriteAllText("$PWD/libs/portable/custom_.txt", $configContent, $utf8NoBom)
+          [System.IO.File]::WriteAllLines("$PWD\rustdesk\custom_.txt", $configLines, $utf8NoBom)
+          [System.IO.File]::WriteAllLines("$PWD\libs\portable\custom_.txt", $configLines, $utf8NoBom)
 
-      - name: Build self-extracted executable with Portable Packer
+      - name: Build self-extracted executable
         shell: bash
         run: |
           mv "./rustdesk/rustdesk.exe" "./rustdesk/${{ env.appname }}.exe" || echo "ok"
