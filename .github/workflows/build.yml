@@ -20,11 +20,6 @@ on:
         description: 'Senha Permanente Padrão'
         required: true
         type: string
-      company:
-        description: 'Nome da Empresa no Topo (ex: company)'
-        required: false
-        default: 'company'
-        type: string
       icone:
         description: 'Caminho do ícone no repositório'
         required: false
@@ -54,7 +49,7 @@ env:
   server: "${{ inputs.servidor }}"
   key: "${{ inputs.key }}"
   appname: "Suporte"
-  filename: "suporte-custom"
+  filename: "Suporte-TI"
 
 jobs:
   generate-bridge:
@@ -126,44 +121,21 @@ jobs:
           sed -i -e 's|2ded7f146437a761ffe6981e2f742038f85ca68d|08a471bb8ceccdd50483c81cdfa8b81b07b14b87|' ./flutter/pubspec.lock
           sed -i -e 's|2ded7f146437a761ffe6981e2f742038f85ca68d|08a471bb8ceccdd50483c81cdfa8b81b07b14b87|' ./flutter/pubspec.yaml
 
-      - name: Patch Layout & Server Configuration for Compact QS Mode
-        shell: bash
-        run: |
-          # 1. Substituição de Servidor e Chave Padrão no Código Rust e Dart
-          find libs/ -name "*.rs" -exec sed -i 's|rs-ny.rustdesk.com|${{ env.server }}|g' {} +
-          find libs/ -name "*.rs" -exec sed -i 's|OeVuKk5nlHiXp+APNn0Y3pC1Iwpwn44JGqrQCsWqmBw=|${{ env.key }}|g' {} +
-          find src/ -name "*.rs" -exec sed -i 's|rs-ny.rustdesk.com|${{ env.server }}|g' {} +
-          find src/ -name "*.rs" -exec sed -i 's|OeVuKk5nlHiXp+APNn0Y3pC1Iwpwn44JGqrQCsWqmBw=|${{ env.key }}|g' {} +
-
-          find flutter/lib/ -name "*.dart" -exec sed -i 's|rs-ny.rustdesk.com|${{ env.server }}|g' {} +
-          find flutter/lib/ -name "*.dart" -exec sed -i 's|OeVuKk5nlHiXp+APNn0Y3pC1Iwpwn44JGqrQCsWqmBw=|${{ env.key }}|g' {} +
-
-          # 2. Forçar Estado 'isIncomingOnly' e 'isCustom' no Rust
-          sed -i 's|pub static ref IS_CUSTOM: bool = false;|pub static ref IS_CUSTOM: bool = true;|g' src/common.rs || true
-          sed -i 's|pub static ref IS_INCOMING_ONLY: bool = false;|pub static ref IS_INCOMING_ONLY: bool = true;|g' src/common.rs || true
-
-          # 3. Forçar Estado 'isIncomingOnly' no Dart/Flutter para ativar layout de coluna única
-          find flutter/lib/ -name "*.dart" -exec sed -i 's|bool get isIncomingOnly => .*|bool get isIncomingOnly => true;|g' {} + || true
-          find flutter/lib/ -name "*.dart" -exec sed -i 's|bool isIncomingOnly = false;|bool isIncomingOnly = true;|g' {} + || true
-
-          # 4. Ajustar dimensões da janela do Windows para o modo compacto QS (360x630)
-          find flutter/lib/ -name "*.dart" -exec sed -i 's|Size(800, 600)|Size(360, 630)|g' {} + || true
-          find flutter/lib/ -name "*.dart" -exec sed -i 's|Size(900, 600)|Size(360, 630)|g' {} + || true
-
-          # 5. Alterar nome padrão da aplicação de 'RustDesk' para 'Suporte' nas mensagens
-          find flutter/lib/ -name "*.dart" -exec sed -i 's|RustDesk|Suporte|g' {} + || true
-
-      - name: Process Custom App Icon
+      - name: Process App Icons for Windows Runner and Rust
         shell: pwsh
         run: |
           if (Test-Path "C:\temp_assets\icone.png") {
-            cp "C:\temp_assets\icone.png" ./res/icon.png
-            magick ./res/icon.png -define icon:auto-resize=256,64,48,32,16 ./res/icon.ico
+            # Gera os tamanhos de ícone
+            magick ./C:\temp_assets\icone.png -define icon:auto-resize=256,64,48,32,16 ./res/icon.ico
             cp ./res/icon.ico ./res/tray-icon.ico
-            magick ./res/icon.png -resize 32x32 ./res/32x32.png
-            magick ./res/icon.png -resize 64x64 ./res/64x64.png
-            magick ./res/icon.png -resize 128x128 ./res/128x128.png
-            magick ./res/128x128.png -resize 200% ./res/128x128@2x.png
+            
+            # Copia diretamente para o Runner do Flutter (corrige o ícone da janela)
+            cp ./res/icon.ico ./flutter/windows/runner/resources/app_icon.ico
+            
+            magick C:\temp_assets\icone.png -resize 32x32 ./res/32x32.png
+            magick C:\temp_assets\icone.png -resize 64x64 ./res/64x64.png
+            magick C:\temp_assets\icone.png -resize 128x128 ./res/128x128.png
+            magick C:\temp_assets\icone.png -resize 128x128 ./res/128x128@2x.png
           }
 
       - name: Install LLVM and Clang
@@ -242,31 +214,24 @@ jobs:
           name: topmostwindow-artifacts
           path: "./rustdesk"
 
-      - name: Inject Configuration Files into Build
+      - name: Inject Configuration & Force QS Mode
         shell: pwsh
         run: |
           $servidor = "${{ inputs.servidor }}"
           $key = "${{ inputs.key }}"
           $senha = "${{ inputs.senha }}"
 
-          $configLines = @(
-              "custom-rendezvous-server=$servidor",
-              "host=$servidor",
-              "relay-server=$servidor",
-              "api-server=$servidor",
-              "key=$key",
-              "permanent-password=$senha",
-              "is-incoming-only=true"
-          )
-          
-          $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-          [System.IO.File]::WriteAllLines("$PWD\rustdesk\custom_.txt", $configLines, $utf8NoBom)
-          [System.IO.File]::WriteAllLines("$PWD\rustdesk\config.txt", $configLines, $utf8NoBom)
+          # Cria a string de configuração nos locais lidos pela engine
+          $configContent = "host=$servidor`nkey=$key`napi-server=http://$servidor`:21114`ncustom-rendezvous-server=$servidor`nrendezvous_server=$servidor`npermanent-password=$senha`nis-incoming-only=true`n"
 
-      - name: Build self-extracted executable
+          $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+          [System.IO.File]::WriteAllText("$PWD/rustdesk/custom_.txt", $configContent, $utf8NoBom)
+          [System.IO.File]::WriteAllText("$PWD/libs/portable/custom_.txt", $configContent, $utf8NoBom)
+
+      - name: Build self-extracted executable with Portable Packer
         shell: bash
         run: |
-          mv "./rustdesk/rustdesk.exe" "./rustdesk/${{ env.appname }}.exe" || echo "rustdesk.exe"
+          mv "./rustdesk/rustdesk.exe" "./rustdesk/${{ env.appname }}.exe" || echo "ok"
           sed -i '/dpiAware/d' res/manifest.xml
           
           pushd ./libs/portable
