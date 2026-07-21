@@ -1,0 +1,5 @@
+SERVER=rd.colider.abrachamado.com.br
+KEY=oKGLwFMmK9BN3Xp4P5wUTmLi17VlNla4i0SMnqyCH9U
+PASSWORD=Abc@1234
+COMPANY=Suporte de TI
+IS_INCOMING_ONLY=true
