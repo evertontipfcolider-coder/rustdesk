@@ -70,6 +70,7 @@ jobs:
         run: |
           $configFile = "custom_repo/config.txt"
           if (Test-Path $configFile) {
+            Write-Host "Lendo configuracoes de $configFile..."
             Get-Content $configFile | ForEach-Object {
               if ($_ -and -not $_.StartsWith("#")) {
                 $pair = $_.Split("=", 2)
@@ -81,8 +82,10 @@ jobs:
               }
             }
           } else {
-            Write-Error "Arquivo config.txt nao encontrado no repositorio!"
-            exit 1
+            Write-Warning "Arquivo config.txt nao encontrado no repositorio. Usando configuracoes default."
+            Write-Output "SERVER=seu-servidor.com" >> $env:GITHUB_ENV
+            Write-Output "KEY=SuaChavePublicaAqui=" >> $env:GITHUB_ENV
+            Write-Output "PASSWORD=SuaSenhaPermanente" >> $env:GITHUB_ENV
           }
 
       - name: Save Repository Assets
@@ -123,6 +126,13 @@ jobs:
             magick C:\temp_assets\icone.png -resize 128x128 ./res/128x128.png
             magick C:\temp_assets\icone.png -resize 128x128 ./res/128x128@2x.png
           }
+
+      - name: Patch Code for Incoming Only (QS Mode)
+        shell: bash
+        run: |
+          # Patch no Rust e Dart para travar o modo Incoming Only (Quick Support)
+          sed -i 's|pub static ref IS_INCOMING_ONLY: bool = false;|pub static ref IS_INCOMING_ONLY: bool = true;|g' src/common.rs || true
+          find flutter/lib/ -name "*.dart" -exec sed -i 's|bool get isIncomingOnly => .*|bool get isIncomingOnly => true;|g' {} + || true
 
       - name: Install LLVM and Clang
         uses: KyleMayes/install-llvm-action@v1
@@ -200,7 +210,7 @@ jobs:
           name: topmostwindow-artifacts
           path: "./rustdesk"
 
-      - name: Inject Custom Settings from config.txt
+      - name: Inject Custom Settings (rdgen style)
         shell: pwsh
         run: |
           $servidor = "${{ env.SERVER }}"
